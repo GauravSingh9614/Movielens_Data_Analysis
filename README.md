@@ -2,8 +2,8 @@
 Title: "Movielens Data Analysis"
 Author: "Gaurav Singh"
 Date: "8 April 2018"
-Output: html_document:
-          keep_md: true
+Output: rmarkdown::github_document
+          
 ---
 
 This is a data analysis project of movielens data. It includes data cleaning and exploration of the Users, Ratings and Movies dataset. In addition to that, I have answered some analytical questions using the dataset which would help us gain some interesting insights into the field of cinematography.
