@@ -1,290 +1,306 @@
-#MovieLens Analysis
-rm(list = ls())
 
-library(dplyr)
-library(ggplot2)
-library(tidyr)
-library(data.table)
-library(lubridate)
-library(Amelia)
-library(stringr)
-library(plotly)
-
-#Function for reading in multiple seperators
-
-# readMulti <- function(dataset, sep){
-#   ds <- readLines(dataset)
-#   ds1 <- gsub(sep, "\t", ds)
-#   ds2 <- read.csv(text = ds1, sep = "\t")
-#   return(ds2)
-# }
-
-readMulti <- function(dataset, sep){
-  ds <- readLines(dataset)
-  ds1 <- gsub(sep, "\t", ds)
-  ds2 <- paste0(ds1, collapse = "\n")
-  ds3 <- fread(ds2, sep = "\t")
-  return (ds3)
-}
-
-movies <- readMulti("D:\\Projects\\Movielens Analysis\\Dataset\\ml-1m\\ml-1m\\movies.dat", sep = "::")
-ratings <- readMulti("D:\\Projects\\Movielens Analysis\\Dataset\\ml-1m\\ml-1m\\ratings.dat", sep = "::")
-users <- readMulti("D:\\Projects\\Movielens Analysis\\Dataset\\ml-1m\\ml-1m\\users.dat", sep = "::")
-
-colnames(movies) <- c("MovieID", "Title", "Genres")
-colnames(ratings) <- c("UserID", "MovieID", "Rating", "Timestamp")
-colnames(users) <- c("UserID", "Gender", "Age", "Occupation", "Zip-code")
-
-#Data Cleaning
-
-#Rating
-str(ratings)
-
-ratings$Timestamp <- as_datetime(ratings$Timestamp)
-summary(ratings)
-
-any(is.na(ratings)) #No missing values.
-
-glimpse(ratings)
-str(ratings)
-
-ratings.plot <- ggplot(ratings, aes(x = Rating)) + geom_bar(aes(fill = ..count..))
-ratings.plot <- ratings.plot + scale_fill_gradient(low = 'red', high = 'green') + theme_bw()
-ratings.plot
-
-#Movies
-glimpse(movies)
-head(movies)
-
-#Extracting debut year as a new column
-r <- gregexpr("\\(\\d+\\)", movies$Title)
-debut.year <- unlist(regmatches(movies$Title, r))
-debut.year <- gsub("\\(|\\)", "", debut.year)
-debut.year <- as.Date(debut.year, "%Y")
-debut.year <- year(debut.year)
-movies$Year <- debut.year
-str(movies)
-
-#Remove the debut years from original title column
-movies$Title <- gsub("\\(\\d+\\)", "", movies$Title)
-movies$Title <- str_trim(as.character(movies$Title), side = "both")
-any(is.na(movies))
-
-
-#USERS
-str(users)
-users$Occupation <- as.factor(users$Occupation)
-
-
-occupation.encode <- function(x){
-  switch(as.character(x), "0"="other or notspecified"
-         ,"1"="academic/educator"
-         ,"2"="artist"
-         ,"3"="clerical/admin"
-         ,"4"="college/gradstudent"
-         ,"5"="customerservice"
-         ,"6"="doctor/healthcare"
-         ,"7"="executive/managerial"
-         ,"8"="farmer"
-         ,"9"="homemaker"
-         ,"10"="K-12student"
-         ,"11"="lawyer"
-         ,"12"="programmer"
-         ,"13"="retired"
-         ,"14"="sales/marketing"
-         ,"15"="scientist"
-         ,"16"="self-employed"
-         ,"17"="technician/engineer"
-         ,"18"="tradesman/craftsman"
-         ,"19"="unemployed"
-         ,"20"="writer")
-}
-
-users$Occupation <-  sapply(users$Occupation, occupation.encode)
-
-#Data Exploration
-
-#How many movies were produced per year?
-
-movies.per.year <- movies %>% group_by(Year) %>% summarise(count = n()) %>% arrange(desc(Year))
-movies.per.year
-
-
-movies.perYear.plot <- ggplot(movies.per.year, aes(x = Year, y = count)) + geom_col(aes(fill = count))
-movies.perYear.plot <- movies.perYear.plot + scale_fill_gradient(low = 'green', high = 'blue') + theme_dark()
-movies.perYear.plot
-
-movies.perYear.plot <- ggplot(movies.per.year, aes(x = Year, y = count)) + geom_line(col = 'blue', linetype = 'solid', size = 1) + theme_bw()
-movies.perYear.plot
-
-#From the plot above we can see that the number of movies produced is increasing year after year and so is the deman
-#The sharp decline in the year 2000 is due to the fact that the data in the dataset is only till year 2000.
-
-#What were the most popular movies genres year by year?
-
-genresByYear <- movies %>% separate_rows(Genres, sep = "\\|") %>% select(MovieID, Year, Genres) %>% group_by(Year, Genres) %>% summarise(count = n()) %>% arrange(desc(Year))
-
-ggplot(genresByYear, aes(x = Year, y = count)) + geom_col(aes(fill = Genres), position = 'dodge')
-genresByYear %>% filter(Genres %in% c('Action', 'Drama', 'Horror')) %>% ggplot(aes(x = Year, y = count)) + geom_line(aes(col = Genres), size = 1) + facet_grid(Genres~.)
-
-#Discretization of Year to make it readable
-
-year.discretize <- function(x){
-  if(x >= 1920 && x <= 1940){
-    return('1920-1940')
-  }
-  else if(x >= 1941 && x <= 1960){
-    return('1941-1960')
-  }
-  else if(x >= 1961 && x <= 1980){
-    return('1961-1980')
-  }
-  else{
-    return('1981-2000')
-  }
-}
-
-genresByYear$grouped.year <- sapply(genresByYear$Year, year.discretize)
-
-ggplot(genresByYear, aes(x = grouped.year, y = count)) + geom_col(aes(fill = Genres), position = 'dodge')
-
-#Choosing only a few main genres for readability
-
-genresByYear %>% filter(Genres %in% c('Action', 'Drama', 'Comedy', 'Romance')) %>% ggplot(aes(x = grouped.year, y = count)) + geom_col(aes(fill = Genres), position = 'dodge')
-
-#Line graph for looking at trend
-
-genresByYear %>% filter(Genres %in% c('Action', 'Drama', 'Comedy', 'Romance', 'War')) %>% ggplot(aes(x = Year, y = count)) + geom_line(aes(col = Genres), size = 1)
-
-#Average ratings by Genre*
-
-#Best movies of every decade based on users ratings
-
-#All time best movies
-
-movies.ratings <- inner_join(ratings, movies, by = 'MovieID')
-str(movies.ratings)
-
-any(is.na(movies.ratings))
-
-head(movies.ratings)
-
-movies.ratings <- rename(movies.ratings, ratings.date = Timestamp)
-
-best.ratings <- movies.ratings %>% select(Rating, Title, UserID) %>% group_by(Title) %>% summarise(avg_rating = mean(Rating), number_of_ratings = n()) %>% arrange(desc(avg_rating))
-print(best.ratings, n = 100)
-
-ggplot(best.ratings[1:10,], aes(x = Title, y = avg_rating)) + geom_col(fill = "blue") + coord_flip()
-
-#Looking at the best movies with more than 100 ratings since alot of movies have 1 rating of 5 stars as seen in the above plot.
-best.ratings.filtered <- best.ratings %>% filter(number_of_ratings > 100) %>% arrange(desc(avg_rating))
-best.ratings.filtered
-#Plot made interative and x labels removed cuz it was too overcrowded.
-# ratings.plot <- ggplot(best.ratings.filtered[1:10,], aes(x = Title, y = avg_rating)) + geom_col(aes(fill = number_of_ratings)) + ggtitle("Average Ratings by Movies") + theme(axis.title.x = element_blank(),
-#                                                                                                                                                                               axis.text.x = element_blank(),
-#                                                                                                                                                                               axis.ticks.x = element_blank())
-str(best.ratings.filtered)
-best.ratings.filtered$Title<- factor(best.ratings.filtered$Title, levels = rev(unique(as.character(best.ratings.filtered$Title))))
-head(best.ratings.filtered)
-ratings.plot <- ggplot(best.ratings.filtered[1:10,], aes(x = Title, y = avg_rating)) + geom_col(aes(fill = number_of_ratings)) + ggtitle("Average Ratings by Movies") + coord_flip()
-ratings.plot
-ggplotly(ratings.plot)
-
-#Best years for a genre based on rating
-
-genres.ratings.by.year <- movies.ratings %>% select(Year, Genres, Rating) %>% separate_rows(Genres, sep = "\\|") %>% group_by(Year, Genres) %>% summarise(avg_rating = mean(Rating))
-
-genres.ratings.by.year %>% filter(Genres %in% c('Action', 'Drama', 'Sci-Fi', 'Documentary')) %>% ggplot(aes(x = Year, y = avg_rating)) + geom_line(aes(col = Genres)) + facet_grid(.~Genres) + geom_smooth()
-
-#Plot above is biased because it takes average rating instead of weighted ratings based on the number of reviews.
-
-#We take only the genres that have atleast a 5000 ratings.
-
-
-genres.ratings.by.year.filtered <- movies.ratings %>% select(UserID, Year, Genres, Rating) %>% separate_rows(Genres, sep = "\\|") %>% group_by(Year, Genres) %>% summarise(avg_rating = mean(Rating), number_of_ratings = n()) %>% filter(number_of_ratings >= 5000)
-
-genres.ratings.by.year.filtered %>% filter(Genres %in% c('Action', 'Drama', 'Sci-Fi', 'Documentary')) %>% ggplot(aes(x = Year, y = avg_rating)) + geom_line(aes(col = Genres)) + facet_grid(.~Genres) + geom_smooth()
-
-
-#Distribution of Users Age
-
-ggplot(users, aes(x = Age)) + geom_histogram(binwidth = 1)
-
-
-# Encoding Age
-
-Age.encoding <- function(x){
-  switch(as.character(x), "1"="Under 18"
-         ,"18"="18-24"
-         ,"25"="25-34"
-         ,"35"="35-44"
-         ,"45"="45-49"
-         ,"50"="50-55"
-         ,"56"="56+")
-}
-
-users$Age.Grouped <- sapply(users$Age, Age.encoding)
-
-
-ggplot(users, aes(x = Age.Grouped)) + geom_bar(aes(fill = ..count..))
-
-
-#Distribution of users Occupation
-
-
-
-occupation.sorted <- as.data.frame(sort(table(users$Occupation), decreasing = TRUE))
-colnames(occupation.sorted) <- c('Occupation', 'Frequency')
-occupation.sorted$Occupation <- factor(occupation.sorted$Occupation, levels = rev(unique(as.character(occupation.sorted$Occupation))))
-
-
-ggplot(occupation.sorted, aes(x = Occupation, y = Frequency)) + geom_col(aes(fill = Frequency)) + ggtitle('Distribution of Users Occupations') + coord_flip()
-
-#In the above plot, it makes sense that graduate/college students are the highest number of raters and farmers are the lowest
-#as farmers may hardly watch any movies or be interested in them.
-
-
-#Which are the most popular genres by gender?
-users.movies.ratings <- inner_join(users, movies.ratings, by = 'UserID')
-
-head(users.movies.ratings)
-str(users.movies.ratings)
-
-install.packages("modeest")
-
-library(modeest)
-
-gender.popular.genres <- users.movies.ratings %>% select(Gender, Genres) %>% group_by(Gender) %>% do(mode.genres.func1(.))
-colnames(gender.popular.genres) <- c('Gender', 'Genres')
-ggplot(gender.popular.genres, aes(x = Gender, y = Genres)) + geom_col(fill = 'blue') + ylim(c('Drama', 'Comedy'))
-
-
-which.max(table(users.movies.ratings$Genres))
-
-users.movies.ratings$Genres[which.max(table(users.movies.ratings$Genres))]
-
-mode.genres.func <- function(x){
-  ux <- unique(x$Genres)
-  as.data.frame(ux[which.max(table(match(x$Genres,ux)))])
-}
-
-mode.genres.func1 <- function(x){
-  as.data.frame(names(sort(-table(x$Genres)))[1])
-}
-
-
-class(mode.func(users.movies.ratings))
-
-names(sort(-table(users.movies.ratings[users.movies.ratings$Gender == 'M','Genres'])))[1]
-
-x <- table(users.movies.ratings$Genres)
-names(x)[x == max(x)]
-
-#Which are the most popular genres by occupation?
-
-mode.occupation.func <- function(x){
-  as.data.frame(names(sort(-table(x$Genres)))[1])
-}
-
-occupation.popular.genres <- users.movies.ratings %>% select(Occupation, Genres) %>% group_by(Occupation) %>% do(mode.genres.func1(.))
-print(occupation.popular.genres, n = 100)
+#' This is a data analysis project of movielens data. It includes data cleaning and exploration of the Users, Ratings and Movies dataset. In addition to that, I have answered some analytical questions using the dataset which would help us gain some interesting insights into the field of cinematography.	
+#' 	
+#' The files contained are 1,000,209 anonymous ratings of approximately 3,900 movies 	
+#' made by 6,040 MovieLens users who joined MovieLens in 2000.	
+#' 	
+#' 	
+#' Please have a look at the dataset information document for a better understanding of the dataset and how the data was collected.	
+#' 	
+#' ## Set working directory	
+#' 	
+setwd("D:/Projects/Movielens Analysis/")
+#' 	
+#' 	
+#' 	
+#' ## Loading required packages	
+#' 	
+library(dplyr)	
+library(ggplot2)	
+library(tidyr)	
+library(data.table)	
+library(lubridate)	
+library(Amelia)	
+library(stringr)	
+library(plotly)	
+#' 	
+#' 	
+#' ## Loading the datasets	
+#' The datasets that we have are seperated by "::". Since R only has the ability to read datasets whose delimiter is a single character, I created a function to convert the seperater to a tab character before reading it in.	
+#' 	
+readMulti <- function(dataset, sep){	
+  ds <- readLines(dataset)	
+  ds1 <- gsub(sep, "\t", ds)	
+  ds2 <- paste0(ds1, collapse = "\n")	
+  ds3 <- fread(ds2, sep = "\t")	
+  return (ds3)	
+}	
+#' 	
+#' The readMulti function takes in the dataset and its seperator as parameters and converts the seperater to a tab character. The paste function is being used to convert the rows of the dataset into a character vector of length 1 since the fread function only takes a single length character vector.	
+#' 	
+#' 	
+movies <- readMulti("Dataset\\movies.dat", sep = "::")	
+ratings <- readMulti("Dataset\\ratings.dat", sep = "::")	
+users <- readMulti("Dataset\\users.dat", sep = "::")	
+	
+colnames(movies) <- c("MovieID", "Title", "Genres")	
+colnames(ratings) <- c("UserID", "MovieID", "Rating", "Timestamp")	
+colnames(users) <- c("UserID", "Gender", "Age", "Occupation", "Zip-code")	
+#' 	
+#' The datasets have now been loaded and the column names have been set appropriately.	
+#' 	
+#' ## Data Cleaning	
+#' ### Ratings	
+#' 	
+str(ratings)	
+#' 	
+#' The ratings dataset contains 1 million observations and 4 columns. Only the Timestamp column needed to be dealt with. I converted it to a datetime format.	
+#' 	
+#' 	
+ratings$Timestamp <- as_datetime(ratings$Timestamp)	
+str(ratings)	
+#' 	
+#' 	
+any(is.na(ratings))	
+#' 	
+#' The ratings dataset does not contain any missing values.	
+#' 	
+#' ### Movies	
+#' 	
+str(movies)	
+#' 	
+#' The movies dataset contains 3883 observations and 3 variables.	
+#' 	
+#' 	
+head(movies)	
+#' 	
+#' The titles have the debut year listed in brackets. I extracted this information into a new column called Year as this could be an important variable to gather insights.	
+#' 	
+#' 	
+r <- gregexpr("\\(\\d+\\)", movies$Title)	
+debut.year <- unlist(regmatches(movies$Title, r))	
+debut.year <- gsub("\\(|\\)", "", debut.year)	
+debut.year <- as.Date(debut.year, "%Y")	
+debut.year <- year(debut.year)	
+movies$Year <- debut.year	
+	
+head(movies)	
+#' 	
+#' Since, the debut year information has already been extracted into a new column, I removed it from the title column.	
+#' 	
+movies$Title <- gsub("\\(\\d+\\)", "", movies$Title)	
+movies$Title <- str_trim(as.character(movies$Title), side = "both")	
+	
+head(movies)	
+#' 	
+#' 	
+#' 	
+any(is.na(movies))	
+#' 	
+#' The movies dataset does not contain any missing values.	
+#' 	
+#' ### Users	
+#' 	
+str(users)	
+#' 	
+#' The users dataset contains 6040 observations and 5 variables. The Occupation and Age has been encoded as mentioned in the readme document.	
+#' 	
+#' I de-encoded these variables so that the labels would be accurate and make more sense when creating plots in the Data Exploration section.	
+#' 	
+occupation.encode <- function(x){	
+  switch(as.character(x), "0"="other or notspecified"	
+         ,"1"="academic/educator"	
+         ,"2"="artist"	
+         ,"3"="clerical/admin"	
+         ,"4"="college/gradstudent"	
+         ,"5"="customerservice"	
+         ,"6"="doctor/healthcare"	
+         ,"7"="executive/managerial"	
+         ,"8"="farmer"	
+         ,"9"="homemaker"	
+         ,"10"="K-12student"	
+         ,"11"="lawyer"	
+         ,"12"="programmer"	
+         ,"13"="retired"	
+         ,"14"="sales/marketing"	
+         ,"15"="scientist"	
+         ,"16"="self-employed"	
+         ,"17"="technician/engineer"	
+         ,"18"="tradesman/craftsman"	
+         ,"19"="unemployed"	
+         ,"20"="writer")	
+}	
+	
+Age.encoding <- function(x){	
+  switch(as.character(x), "1"="Under 18"	
+         ,"18"="18-24"	
+         ,"25"="25-34"	
+         ,"35"="35-44"	
+         ,"45"="45-49"	
+         ,"50"="50-55"	
+         ,"56"="56+")	
+}	
+	
+users$Occupation <-  sapply(users$Occupation, occupation.encode)	
+users$Age.Grouped <- sapply(users$Age, Age.encoding)	
+	
+str(users)	
+#' 	
+#' 	
+any(is.na(users))	
+#' 	
+#' The users dataset does not contain any missing values.	
+#' 	
+#' ## Data Exploration	
+#' ### How many movies were produced per year?	
+#' 	
+movies.per.year <- movies %>% group_by(Year) %>% summarise(count = n()) %>% arrange(desc(Year))	
+	
+head(movies.per.year)	
+#' 	
+#' To get a better understanding of the trend, I created a line graph.	
+#' 	
+movies.perYear.plot <- ggplot(movies.per.year, aes(x = Year, y = count)) + geom_line(col = 'blue', linetype = 'solid', size = 1) + theme_bw() + ggtitle('Number of Movies by Year') + ylab('Number of Movies')	
+	
+print(movies.perYear.plot)	
+#' 	
+#' 	
+#' We can see that the demand for movies has been increasing year after year. The sharp drop in the year 2000 is due to the fact that the dataset does not contain information for the entire year 2000.	
+#' 	
+#' ### What were the most popular movie genres year by year?	
+#' 	
+#' 	
+genresByYear <- movies %>% separate_rows(Genres, sep = "\\|") %>% select(MovieID, Year, Genres) %>% group_by(Year, Genres) %>% summarise(count = n()) %>% arrange(desc(Year))	
+	
+head(genresByYear)	
+#' 	
+#' 	
+#' I created a barplot to get a better picture of the popularity.	
+#' 	
+ggplot(genresByYear, aes(x = Year, y = count)) + geom_col(aes(fill = Genres), position = 'dodge') + theme_bw() + ylab('Number of Movies') + ggtitle('Popularity per year by Genre')	
+#' 	
+#' 	
+#' Since the plot is too cluttered, I grouped the year column.	
+#' 	
+#' 	
+year.discretize <- function(x){	
+  if(x >= 1920 && x <= 1940){	
+    return('1920-1940')	
+  }	
+  else if(x >= 1941 && x <= 1960){	
+    return('1941-1960')	
+  }	
+  else if(x >= 1961 && x <= 1980){	
+    return('1961-1980')	
+  }	
+  else{	
+    return('1981-2000')	
+  }	
+}	
+	
+genresByYear$grouped.year <- sapply(genresByYear$Year, year.discretize)	
+	
+ggplot(genresByYear, aes(x = grouped.year, y = count)) + geom_col(aes(fill = Genres), position = 'dodge') + ylab('Number of Movies') + xlab('Year') + ggtitle('Popularity per year by Genre') + theme_bw()	
+#' 	
+#' 	
+#' For better readbility, I filtered the genres.	
+#' 	
+#' 	
+genresByYear %>% filter(Genres %in% c('Action', 'Drama', 'Comedy', 'Romance')) %>% ggplot(aes(x = grouped.year, y = count)) + geom_col(aes(fill = Genres), position = 'dodge') + ylab('Number of Movies') + xlab('Year') + ggtitle('Popularity per year by Genre') + theme_bw()	
+#' 	
+#' 	
+#' This barplot is pretty self explanatory. We can see that the popularity of all the genres have been improving year after year. We can see that the maximum increase in the popularity has been for the drama genre. To analyse the trend even more clearly, I created a line graph.	
+#' 	
+#' 	
+genresByYear %>% filter(Genres %in% c('Action', 'Drama', 'Comedy', 'Romance')) %>% ggplot(aes(x = Year, y = count)) + geom_line(aes(col = Genres), size = 1) + ylab('Number of Movies') + xlab('Year') + ggtitle('Popularity per year by Genre') + theme_bw()	
+#' 	
+#' 	
+#' It can be clearly seen that the demand for these genres exponentially increased in the 1990s.	
+#' 	
+#' ### Which are the best movies of all time based on ratings?	
+#' 	
+#' The movies and ratings dataset are joined based on the MovieID.	
+#' 	
+movies.ratings <- inner_join(ratings, movies, by = 'MovieID')	
+	
+str(movies.ratings)	
+#' 	
+#' For beter clarity, I renamed the Timestamp column to ratings.date as this attribute refers to when the movies were rated.	
+#' 	
+movies.ratings <- rename(movies.ratings, ratings.date = Timestamp)	
+	
+head(movies.ratings)	
+#' 	
+#' 	
+#' Now to retrieve the average ratings for the movies in descending order.	
+#' 	
+best.ratings <- movies.ratings %>% select(Rating, Title, UserID) %>% group_by(Title) %>% summarise(avg_rating = mean(Rating), number_of_ratings = n()) %>% arrange(desc(avg_rating))	
+	
+head(best.ratings)	
+#' 	
+#' 	
+#' I then proceeded to visualize the above data.	
+#' 	
+ggplot(best.ratings[1:10,], aes(x = Title, y = avg_rating)) + geom_col(fill = "blue") + coord_flip() + ylab('Movie Title') + xlab('Average Rating') + ggtitle('Best movies by ratings') + theme_bw()	
+#' 	
+#' 	
+#' The movies shown above all have an average rating of 5 stars. This information is biased as these movies have very few ratings (<5). To get a more accurate plot, I filtered it to only include movies which have atleast 100 ratings.	
+#' 	
+#' 	
+best.ratings.filtered <- best.ratings %>% filter(number_of_ratings > 100) %>% arrange(desc(avg_rating))	
+	
+best.ratings.filtered$Title<- factor(best.ratings.filtered$Title, levels = rev(unique(as.character(best.ratings.filtered$Title))))	
+	
+ggplot(best.ratings.filtered[1:10,], aes(x = Title, y = avg_rating)) + geom_col(aes(fill = number_of_ratings)) + ggtitle("Top 10 movies by ratings") + coord_flip() + ylab('Average Rating') + theme_bw()	
+#' 	
+#' 	
+#' The above plot displays the top 10 movies by ratings in an ordered fashion. This can be confirmed by looking at the top 10 rows of best.ratings.filtered.	
+#' 	
+#' 	
+head(best.ratings.filtered, 10)	
+#' 	
+#' 	
+#' ### Distribution of users age	
+#' 	
+ggplot(users, aes(x = Age.Grouped)) + geom_bar(aes(fill = ..count..)) + ggtitle('Distribution of users ages') + theme_bw()	
+#' 	
+#' 	
+#' It can be seen that most of the users in the dataset are between 25-34 years old. I then wanted to have a look at the distribution of occupations for these users.	
+#' 	
+#' ### Distribution of users occupations	
+#' 	
+occupation.sorted <- as.data.frame(sort(table(users$Occupation), decreasing = TRUE))	
+colnames(occupation.sorted) <- c('Occupation', 'Frequency')	
+occupation.sorted$Occupation <- factor(occupation.sorted$Occupation, levels = rev(unique(as.character(occupation.sorted$Occupation))))	
+	
+	
+ggplot(occupation.sorted, aes(x = Occupation, y = Frequency)) + geom_col(aes(fill = Frequency)) + ggtitle('Distribution of Users Occupations') + coord_flip() + theme_bw()	
+#' 	
+#' 	
+#' College/gradstudent make the majority of the users while farmers make the minority. This makes sense as farmers may hardly watch any movies due to inaccessibility or be interested in them.	
+#' 	
+#' ### Which is the most popular Genre by Gender?	
+#' 	
+#' I first joined the movies, ratings and users datasets by the UserID.	
+#' 	
+users.movies.ratings <- inner_join(users, movies.ratings, by = 'UserID')	
+	
+str(users.movies.ratings)	
+#' 	
+#' As expected we have 1 million rows and 12 variables.	
+#' 	
+#' Proceeding further, I created my own function(mode.genres.func) which I then used to summarise the grouped data by finding the mode.	
+#' 	
+mode.genres.func <- function(x){	
+  as.data.frame(names(sort(-table(x$Genres)))[1])	
+}	
+	
+gender.popular.genres <- users.movies.ratings %>% select(Gender, Genres) %>% group_by(Gender) %>% do(mode.genres.func(.))	
+colnames(gender.popular.genres) <- c('Gender', 'Genres')	
+	
+print(gender.popular.genres)	
+#' 	
+#' We can see that *Drama* is the most popular genre for females while *Comedy* is the most popular genre for males.	
+#' 	
+#' ## Conclusion	
+#' This data analysis project helped us gain some interesting insights into the history of cinematography. The insights gained can be used by movie makers to help decide the type of movies to produce in the future.	
